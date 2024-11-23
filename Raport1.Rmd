@@ -1,0 +1,267 @@
+---
+title: "Kernel"
+author: "Twoje imię i nazwisko"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen=999, digits=3)
+salaries <- read.csv("https://github.com/kflisikowski/ds/raw/master/Salaries.csv")
+```
+
+# Analiza opisowa
+
+Jednym ze sposobów zrozumienia, jak działa rząd miasta, jest spojrzenie na to, kogo zatrudnia i jak jego pracownicy są wynagradzani. Dane te zawierają nazwiska, nazwę stanowiska i wynagrodzenie pracowników miasta San Francisco w ujęciu rocznym od 2011 do 2014 roku.
+
+Oto kilka pomysłów na eksplorację danych:
+
+- Jak zmieniały się wynagrodzenia w czasie między różnymi grupami ludzi?
+
+- Jak płaca podstawowa, wynagrodzenie za nadgodziny i świadczenia są rozdzielane pomiędzy różne grupy?
+
+- Czy w tym zestawie danych istnieją dowody na dyskryminację płacową ze względu na płeć?
+
+- Jak przydzielany jest budżet w zależności od grupy i zakresu obowiązków?
+
+```{r }
+# wymiary ramki:
+dim(salaries)
+# nazwy kolumn:
+names(salaries)
+```
+
+## Histogramy
+
+```{r }
+hist(salaries$TotalPay,main="Total Pay", xlab="Pay (in dollars)")
+abline(v = mean(salaries$TotalPay),lty="dashed")
+abline(v = median(salaries$TotalPay))
+legend("topright", legend=c("Mediana","Średnia"),lty=c("solid","dashed"))
+```
+
+```{r }
+par(mfrow=c(2,2))
+hist(salaries$TotalPay,main="Total Pay, default breaks", xlab="Pay (in dollars)")
+hist(salaries$TotalPay,main="Total Pay, breaks=100", xlab="Pay (in dollars)", breaks=100)
+hist(salaries$TotalPay,main="Total Pay, breaks=1000", xlab="Pay (in dollars)",breaks=1000)
+```
+
+```{r }
+hist(salaries$TotalPay,main="Total Pay, Zoomed-in", xlab="Pay (in dollars)", xlim=c(0,1e5), breaks=1000)
+```
+
+```{r }
+salaries2 <- subset(salaries, JobTitle=="Firefighter" & Status=="FT")
+dim(salaries2)
+```
+
+```{r }
+par(mfrow=c(2,2))
+hist(salaries2$TotalPay,main="Firefighters, default breaks", xlab="Pay (in dollars)")
+hist(salaries2$TotalPay,main="Firefighters, breaks=30", xlab="Pay (in dollars)", breaks=30)
+hist(salaries2$TotalPay,main="Firefighters, breaks=100", xlab="Pay (in dollars)", breaks=100)
+hist(salaries2$TotalPay,main="Firefighters, breaks=1000", xlab="Pay (in dollars)",breaks=1000)
+```
+
+## Wykresy pudełkowe
+
+```{r }
+par(mfrow=c(1,1))
+boxplot(salaries$TotalPay,main="Total Pay, breaks=1000", ylab="Pay (in dollars)")
+```
+
+# Estymacja funkcji gęstości
+
+Pierwszy raport dotyczy nieparametrycznej estymacji gęstości. Klasycznym nieparametrycznym estymatorem gęstości jest histogram, który dostarcza nieciągłe i stałe oszacowania. W tym raporcie skupiono się na niektórych
+alternatywach, które zapewniają ciągłe lub nawet gładkie oszacowania zamiast.
+
+*Metody kernelowe* stanowią ważną klasę gładkich estymatorów gęstości i zaimplementowane są przez funkcję R `density()`. Estymatory te są w zasadzie tylko lokalnie ważonymi średnimi, a ich obliczenie jest stosunkowo proste w teorii. W praktyce, różne wybory sposobu implementacji obliczeń mogą jednak mieć duży wpływ na rzeczywisty czas
+obliczeń, a implementację kernelowych estymatorów gęstości zilustruje trzy punkty:
+
+-   jeśli to możliwe, wybierz wektoryzowane implementacje w R,
+-   jeśli niewielka strata w dokładności jest do zaakceptowania, przybliżone rozwiązanie może być o rzędy wielkości szybsze niż implementacja literalna,
+-   czas potrzebny do numerycznej oceny różnych [funkcje elementarne](https://en.wikipedia.org/wiki/Elementary_function) może bardzo zależeć od funkcji i sposobu implementacji obliczeń.
+
+Metody kernelowe opierają się na jednym lub więcej *parametrach regularności*, które muszą być dobrane tak, aby osiągnąć właściwą równowagę w dostosowaniu do danych bez zbytniego dostosowywania się do losowej zmienności w danych.
+
+Wybór odpowiedniej ilości regularności jest równie ważny jak wybór metody do użycia w pierwszej kolejności. W  rzeczywistości może być ważniejszy. Tak naprawdę nie mamy kompletnej implementacji nieparametrycznego estymatora dopóki nie zaimplementujemy automatycznego, opartego na danych sposobu wyboru ilości regulacji.
+
+Implementacja tylko obliczeń dla oceny estymatora jądra, powiedzmy, i pozostawiając to całkowicie użytkownikowi wyboru szerokości pasma jest pracą w połowie wykonaną. Metody i implementacje do wyboru szerokości pasma są więc w tym raporcie omówione dość szczegółowo.
+
+W ostatniej części przeprowadzona jest analiza prawdopodobieństwa. Robi się to w celu dalszego wyjaśnienia, dlaczego potrzebne są estymatory z regularyzacją w celu uniknięcia nadmiernego dopasowania do danych, oraz dlaczego nie istnieje w ogóle nieparametryczny maksymalnego prawdopodobieństwa estymatora gęstości. Regularyzację prawdopodobieństwamożna osiągnąć poprzez ograniczenie szacunków gęstości do rodziny coraz bardziej elastycznych gęstości parametrycznych, które są dopasowane do danych. Jest to znane jako *metoda sit*. Inne podejście opiera się na rozszerzeniach bazowych, ale w obu przypadkach automatyczny wybór wielkości regularności jest tak samo ważny jak w przypadku metod jądrowych.
+
+Aby utworzyć wykres gęstości jądra, musisz oszacować gęstość jądra. W tym celu można użyć funkcji density, a następnie przekazać obiekt density do funkcji plot.
+
+```{r}
+# dane
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data)
+
+# Kernel density plot
+plot(d, lwd = 2, main = "Default kernel density plot")
+
+```
+
+Argument jądra funkcji gęstości domyślnie używa jądra gaussowskiego (kernel = "gaussian"), ale dostępnych jest więcej typów jądra, takich jak "prostokątne", "trójkątne", "epanechnikov", "biweight", "cosine" i "optcosine". Wybór będzie zależał od twoich danych, ale w większości scenariuszy wartość domyślna jest najbardziej zalecana.
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             kernel = "rectangular")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "Rectangular kernel")
+```
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             kernel = "triangular")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "Triangular kernel")
+```
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             kernel = "epanechnikov")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "Epanechnikov kernel")
+```
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             kernel = "biweight")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "Biweight kernel")
+```
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             kernel = "cosine")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "Cosine kernel")
+```
+
+## Selekcja pasma
+
+Argument bw funkcji gęstości pozwala na zmianę używanego pasma wygładzania. Możesz przekazać wartość lub ciąg znaków podający regułę wyboru lub funkcję. Domyślną wartością jest "nrd0" (lub bw.nrd0(.)), która implementuje podejście oparte na zasadzie reguły kciuka :-) Inne dostępne opcje to:
+
+### Reguła Scotta (1992)
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             bw = "nrd")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "nrd bandwidth")
+```
+
+### Nieobciążona cross-walidacja
+
+```{r message=FALSE, warning=FALSE}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             bw = "ucv")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "ucv bandwidth")
+```
+
+### Obciążona cross-walidacja
+
+```{r message=FALSE, warning=FALSE}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             bw = "bcv")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "bcv bandwidth") 
+
+```
+
+### Metoda Sheather & Jones (1991)
+
+```{r}
+# Data
+set.seed(14012021)
+data <- rnorm(200, mean = 4)
+
+# Kernel density estimation
+d <- density(data,
+             bw = "SJ")
+
+# Kernel density plot
+plot(d, lwd = 2, main = "SJ bandwidth")
+```
+
+Ostrzeżenie!
+
+:   Szerokość pasma musi być bardzo starannie dobrana! Mała szerokość pasma spowoduje powstanie nadmiernie dopasowanej krzywej, natomiast zbyt duża szerokość pasma spowoduje powstanie krzywej nadmiernie wygładzonej.
+
+# Ćwiczenie 1.
+
+Uruchom demo estymatora funkcji gęstości kernel. Zmieniaj zarówno dane wejściowe, jak i opcje estymatora - szerokość pasma oraz rodzaj funkcji jądrowej. Czy widzisz istotne różnice w oszacowaniu?
+
+```{r cwiczenie1}
+install.packages("remotes") #tylko raz! potem #
+remotes::install_github("hericks/KDE") #tylko raz! potem #
+library(KDE)
+shiny_kde() 
+```
+
+# Ćwiczenie 2.
+
+Wykorzystując dowolną funkcję R do estymacji funkcji gęstości oszacuj jej przebieg dla wynagrodzeń (zbiór danych salaries) strażaków w San Francisco. Wykorzystaj metody graficzne dostępne w pakiecie ggplot2. Mile widziane przekroje oraz odpowiedzi na pytania badawcze zadane na wstępie.
+
+```{r cwiczenie2}
+
+```
+

@@ -1,0 +1,677 @@
+---
+title: "Nieklasyczne metody statystyki"
+author: "Nieparametryczna analiza regresji"
+fontsize: 14pt
+output:
+  ioslides_presentation: 
+    widescreen: yes
+    highlight: tango
+    transition: slower
+    code_download: yes
+    keep_md: yes
+    incremental: yes
+  beamer_presentation:
+    theme: metropolis
+    fig_height: 4.5
+    fig_width: 7
+    highlight: tango
+    code_download: yes
+  slidy_presentation: 
+    highlight: tango
+    code_download: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, warning=FALSE, message=FALSE,
+  dev.args=list(bg=grey(0.9), pointsize=11))
+library(faraway)
+library(tidyverse)
+library(KernSmooth)
+library(splines)
+set.seed(1)
+```
+
+# Regresja nieparametryczna
+
+## Regresja nieparametryczna
+
+\begin{block}{}
+\centerline{$y_i = f(x_i) + \varepsilon_i$}
+\end{block}
+
+ * Jak oszacować $f$?
+ * Możemy oszacować $f(x) = \beta_0 + \beta_1 x + \beta_2 x^2 + \beta_3 x^3$
+ * Lub $f(x) = \beta_0 + \beta_1x^{\beta_2}$
+ * OK jeśli *znasz* odpowiednią postać.
+ * Ale lepiej często założyć, że $f$ jest ciągła i wygładzona.
+
+## Przykłady
+
+```{r examples}
+p1 <- ggplot(exa, aes(x=x,y=y)) +
+  geom_point() + geom_line(aes(y=m), col='red', lwd=1) +
+  ggtitle("Przykład A")
+p2 <- ggplot(as.data.frame(exb), aes(x=x,y=y)) +
+  geom_point() + geom_line(aes(y=m), col='red', lwd=1) +
+  ggtitle("Przykład B")
+p3 <- ggplot(faithful, aes(x=eruptions,y=waiting)) +
+  geom_point() + #geom_smooth(col='red', lwd=1, se=FALSE) +
+  ggtitle("Old Faithful")
+gridExtra::grid.arrange(p1,p2,p3,nrow=1)
+```
+
+# Estymatory kernel
+
+## Estymatory kernel
+
+\begin{block}{Nadaraya--Watson estymator}
+$$\hat{f}_h(x) = \frac{\displaystyle\sum_{j=1}^n K\left(\frac{x-x_j}{h}\right) y_j}{\displaystyle\sum_{j=1}^n K\left(\frac{x-x_j}{h}\right)} $$
+\end{block}
+
+ * $K$ jest funkcją typu kernel, gdzie: $\int K = 1$, $K(a)=K(-a)$, oraz $K(0)\ge K(a)$, dla wszystkich $a$.
+ * $\hat{f}$ jest ważoną średnią ruchomą
+ * Musimy dobrać $K$ oraz $h$.
+
+## Popularne kernele
+\fontsize{14}{14}\sf
+
+\alert{Prostokątny}
+$$K(x)= \begin{cases}
+  \frac{1}{2} &  -1 < x < 1 \\
+  0 & \text{dla pozostałych}.
+  \end{cases}$$
+
+\alert{Epanechnikov}
+$$K(x) = \begin{cases}
+  \frac{3}{4}(1-x^2) & -1 < x < 1 \\
+  0 & \text{dla pozostałych}.
+  \end{cases}$$
+
+\alert{Tri-cube}
+$$K(x) = \begin{cases}
+  c(1-|x|^3)^3 & -1 < x < 1 \\
+  0 & \text{dla pozostałych}.
+  \end{cases}$$
+
+\alert{Gaussowski}
+$$K(x) = \frac{1}{\sqrt{2\pi}} e^{-\frac{1}{2}x^2}$$
+
+## Popularne kernele
+
+```{r kernels}
+x <- seq(-3,3,by=0.01)
+db <- data.frame(
+  x = x,
+  f1 = 0.5*as.numeric(abs(x)<1),
+  f2 = pmax(0, 0.75*(1-x^2)),
+  f3 = dnorm(x),
+  f4 = pmax(0, (1-abs(x)^3)^3/1.157143))
+ggplot(db, aes(x=x)) +
+  geom_line(aes(y=f1,col='Prostokątny')) +
+  geom_line(aes(y=f2,col="Epanechnikov")) +
+  geom_line(aes(y=f4,col="Tri-cube")) +
+  geom_line(aes(y=f3,col="Gaussowski")) +
+  guides(col=guide_legend(title="Kernel")) +
+  ylab("K(x)")
+```
+
+
+
+## Kernel - wygładzanie
+
+ * Gładkie jądro jest lepsze, ale poza tym wybór jądra nie robi wielkiej różnicy.
+ * Optymalnym jądrem (minimalizującym MSE) jest Epanechnikov. Jest ono również szybkie.
+ * Wybór wartości $h$ jest kluczowy.
+
+
+## Cross-validation
+
+$$CV(h) = \frac{1}{n} \sum_{j=1}^n (y_j - \hat{f}^{(-j)}_h(x_j))^2$$
+
+ * $(-j)$ wskazuje $j$-ty punkt pominięty w oszacowaniu
+ * Wybierz $h$, które minimalizuje CV.
+ * Działa ok pod warunkiem, że nie ma zduplikowanych par $(x,y)$. Ale sporadycznie pojawiają się dziwne wyniki.
+
+## MSE
+\fontsize{14}{17}\sf
+
+Niech $y=f(x) + \varepsilon$ gdzie $\varepsilon \sim IID(0,\sigma^2)$. Wtedy
+
+\begin{block}{}
+$$\text{MSE}(h) = \E [f(x) - \hat{f}_h(x)] ^2
+ \approx \frac{\sigma^2r_K}{nh} + \frac{v_K^2 h^4[f''(x)]^2}{4}$$
+\end{block}
+
+ * $r_K = \displaystyle\int K^2(x) dx$, \qquad $v_K = \displaystyle\int x^2K(x)dx$
+
+ * Estymator spójny, jeśli $nh\rightarrow\infty$ oraz $h\rightarrow0$ jako $n\rightarrow\infty$.
+
+ * $h_{\text{optimal}} \approx\displaystyle \left(\frac{r_K}{n[f''(x)]^2v_K^2}\right)^{1/5}$
+
+
+## Kernel smoothing w R
+\fontsize{11}{11}\sf
+
+Dostępnych jest wiele pakietów. Jeden z lepszych to **KernSmooth**:
+
+```{r, echo=TRUE, fig.height=3}
+fit <- locpoly(faithful$eruptions, faithful$waiting,
+        degree=0, bandwidth=0.3) %>% as.tibble
+ggplot(faithful) +
+  geom_point(aes(x=eruptions,y=waiting)) +
+  geom_line(data=fit, aes(x=x,y=y), col='blue')
+```
+
+# Wielomiany lokalne
+
+## Wielomiany lokalne
+
+Wygładzanie kernelem jest metodą o stałej lokalnej:
+
+
+$\text{WLS}(x) = \sum_{j=1}^n w_j(x) (y_j - a_0)^2$
+
+gdzie 
+
+
+$w_j(x) = \frac{K\left(\frac{x-x_j}{h}\right)}{\sum_{i=1}^n K\left(\frac{x-x_i}{h}\right)}$
+
+
+jest minimalizowane przez
+
+$\hat{f}(x) = \hat{a}_0 = \sum_{j=1}^n w_j(x)y_j$
+
+
+## Wielomiany lokalne
+
+Zamiast tego możemy obliczyć lokalny liniowy:
+
+\begin{block}{}
+$$\text{WLS}(x) = \sum_{j=1}^n w_j(x) (y_j - a_0 - a_1(x_j-x))^2$$
+\end{block}
+
+$$\hat{f}(x) = \hat{a}_0$$
+
+## Wielomiany lokalne
+
+\placefig{2.3}{1.5}{height=8cm,width=8cm}{pulplocreg}
+
+## Wielomiany lokalne
+
+\begin{block}{}
+$$\text{WLS}(x) = \sum_{j=1}^n w_j(x) (y_j - \sum_{k=0}^p a_k(x_j-x)^p )^2$$
+\end{block}
+
+$$\hat{f}(x) = \hat{a}_0$$
+
+ * Lokalne liniowe i lokalne kwadratowe są powszechnie stosowane.
+ * Odporna regresja może być użyta jako zamiennik!
+ * Mniej stronniczy na granicach niż wygładzanie jądra!
+ * Lokalna kwadratura mniej nieobiektywna przy szczytach i dołkach niż lokalna liniowa lub kernelowa
+
+## Wielomiany lokalne w R
+
+* Bardzo wygodną funkcją jest\newline `KernSmooth::locpoly(x, y, degree, bandwidth)`
+* Wykorzystuje się tutaj kernel Gaussowski.
+* `dpill` może być użyte do wyboru `bandwidth` $h$ jako `degree=1`.
+* Wiele osób wydaje się używać metody prób i błędów --- znalezienie największego $h$, który uchwyci to, co myślą, że widzą na oko.
+
+
+
+## Loess
+
+Najbardziej znaną implementacją jest **loess** (lokalnie kwadratowy)
+
+```r
+fit <- loess(y ~ x, span=0.75, degree=2,
+  family="gaussian", data)
+```
+
+ * Używa się tutaj jądra tri-cube i zmiennej szerokości pasma.
+ * `span` kontroluje szerokość pasma. Określone w procentach pokrytych danych.
+ * `degree` jest rzędem wielomianu
+ * Użyj `family="symmetric"` dla solidnego dopasowania
+
+## Loess
+
+```{r faithfulloess}
+smr <- loess(waiting ~ eruptions, data=faithful)
+ggplot(faithful) +
+    geom_point(aes(x=eruptions,y=waiting)) +
+    ggtitle("Old Faithful (Loess, span=0.75)") +
+    geom_line(aes(x=eruptions, y=fitted(smr)), col='blue')
+```
+
+
+## Loess w R
+
+\fontsize{12}{14}\sf
+
+```r
+smr <- loess(waiting ~ eruptions, data=faithful)
+ggplot(faithful) +
+    geom_point(aes(x=eruptions,y=waiting)) +
+    ggtitle("Old Faithful (Loess, span=0.75)") +
+    geom_line(aes(x=eruptions, y=fitted(smr)),
+      col='blue')
+```
+
+
+## Loess w R
+
+```{r exaloess}
+smr <- loess(y ~ x, data=exa)
+ggplot(exa) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład A (Loess, span=0.75)") +
+    geom_line(aes(x=x, y=fitted(smr)), col='blue') +
+    geom_line(aes(x=x,y=m), col='red')
+```
+
+
+## Loess w R
+
+```{r exa2loess}
+smr <- loess(y ~ x, data=exa, span=0.22)
+ggplot(exa) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład A (Loess, span=0.22)") +
+    geom_line(aes(x=x, y=fitted(smr)), col='blue') +
+    geom_line(aes(x=x,y=m), col='red')
+```
+
+
+## Loess w R
+
+```{r exbloess}
+smr <- loess(y ~ x, data=exb, family='symmetric')
+ggplot(as.data.frame(exb)) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład B (Odporny Loess, span=0.75)") +
+    geom_line(aes(x=x, y=fitted(smr)), col='blue') +
+    geom_line(aes(x=x,y=m), col='red')
+```
+
+## Loess oraz geom_smooth()
+\fontsize{12}{12}\sf
+
+```{r loessmooth, echo=TRUE, fig.height=3.4}
+ggplot(exa) +
+    geom_point(aes(x=x,y=y)) +
+    geom_smooth(aes(x=x,y=y), method='loess',
+      span=0.22)
+```
+
+## Loess oraz geom_smooth()
+
+* Ponieważ lokalne wielomiany wykorzystują lokalne modele liniowe, możemy łatwo znaleźć błędy standardowe dla dopasowanych wartości.
+
+* Połączone razem, tworzą one punktowy przedział ufności.
+
+* Automatycznie tworzone przy użyciu `geom_smooth`.
+
+
+
+# Sploty interpolujące
+
+## Sploty interpolujące
+
+\begin{block}{}
+"Spline" jest ciągłą funkcją $f(x)$ interpolującą wszystkie punkty ($\kappa_j,y_j$) dla $j=1,\dots,K$ i składające się z wielomianów pomiędzy każdą kolejną parą "węzłów" $ i $\kappa_{j+1}$.
+\end{block}
+\pause
+* Parametry ograniczone tak, aby $f(x)$ było ciągłe.
+* Dalsze ograniczenia nałożone, aby dać ciągłe pochodne.
+* Kwadratowe sploty są najczęściej występujące, dla ciągłych $f'$, $f''$
+
+## Sploty interpolujące
+
+Niech $y=f(x) + \varepsilon$ gdzie $\varepsilon \sim IID(0,\sigma^2)$. Wtedy
+Wybierz $\hat{f}$ by zminimalizować
+\begin{block}{}
+$$\frac{1}{n} \sum_i (y_i - f(x_i))^2+ \lambda\int [f''(x)]^2 dx$$
+\end{block}
+ * $\lambda$ jest parametrem wygładzania, który należy wybrać
+ * $\int [f''(x)]^2 dx$ to miara chropowatości.
+ * Rozwiązanie: $\hat{f}$ jest splajnem sześciennym z węzłami $\kappa_i=x_i$, $i=1,\dots,n$ (ignorując duplikaty).
+ * Inne ograniczenia prowadzą do splotów wyższego rzędu
+ * Walidacja krzyżowa może być użyta do wyboru $\lambda$.
+
+
+## Sploty interpolujące
+
+```{r faithfulsplinecv}
+smr <- smooth.spline(faithful$eruptions, faithful$waiting, cv=TRUE)
+smr <- data.frame(x=smr$x,y=smr$y)
+ggplot(faithful) +
+    geom_point(aes(x=eruptions,y=waiting)) +
+    ggtitle("Old Faithful (Sploty interpolujące, lambda wybrana przez CV)") +
+    geom_line(data=smr, aes(x=x, y=y), col='blue')
+```
+
+
+
+## Sploty interpolujące
+\fontsize{11}{14}\sf
+
+```r
+smr <- smooth.spline(
+  faithful$eruptions,
+  faithful$waiting,
+  cv=TRUE)
+smr <- data.frame(x=smr$x,y=smr$y)
+ggplot(faithful) +
+  geom_point(aes(x=eruptions,y=waiting)) +
+  ggtitle("Old Faithful (Sploty interpolujące, lambda wybrana przez CV)") +
+  geom_line(data=smr, aes(x=x, y=y), col='blue')
+```
+
+
+## Sploty interpolujące
+
+```{r exacv}
+smr <- smooth.spline(exa$x,exa$y, cv=TRUE)
+smr <- data.frame(x=smr$x,y=smr$y)
+ggplot(exa) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład A (Sploty interpolujące, lambda wybrana przez CV)") +
+    geom_line(data=smr, aes(x=x, y=y), col='blue') +
+    geom_line(aes(x=x,y=m), col='red')
+```
+
+
+# Sploty regresyjne
+
+## Sploty regresyjne
+
+ * Mniej węzłów niż splajnów wygładzających
+ * Potrzeba wyboru węzłów, a nie parametru wygładzania.
+ * Można oszacować jako model liniowy po wybraniu węzłów.
+
+## Sploty regresji sześciennej
+
+* Niech $\kappa_1<\kappa_2<\cdots<\kappa_K$ będzie ``knots'' w przedziale $(a,b)$.
+* Niech $x_1=x$, $x_2 = x^2$, $x_3=x^3$, $x_j =
+(x-\kappa_{j-3})_+^3$ dla $j=4,\dots,K+3$.
+* Wtedy regresja $y$ wobec $x_1,\dots,x_{K+3}$ jest sześcienna, ale gładka w węzłach.
+* Wybór węzłów może być trudny i arbitralny.
+* Algorytmy automatycznego wyboru węzłów są bardzo wolne.
+* Często używa się równo rozłożonych węzłów. Wtedy wystarczy wybrać tylko $K$.
+
+## B-sploty i sploty naturalne 
+
+* B-splajny dostarczają równoważnego zestawu funkcji bazowych.
+* Naturalne splajny sześcienne są wariacją na temat B-splajnów z liniowymi warunkami brzegowymi.
+* Są one zazwyczaj bardziej stabilne
+* Zaimplementowane w funkcji `splines::ns` w R
+* Można określić węzły jawnie, lub `df`.  Wtedy `df-2` węzły są wybierane na kwantylach $x$.
+
+## Naturalne sploty w R
+\fontsize{10}{10}\sf
+
+```{r faithfulbspline, echo=TRUE, fig.height=3.4}
+fit <- lm(waiting ~ ns(eruptions, df=6), faithful)
+ggplot(faithful) +
+    geom_point(aes(x=eruptions,y=waiting)) +
+    ggtitle("Old Faithful (Naturalne sploty, 6 df)") +
+    geom_line(aes(x=eruptions, y=fitted(fit)), col='blue')
+```
+
+## Naturalne sploty w R
+
+```{r exabspline}
+fit <- lm(y ~ ns(x, df=12), exa)
+ggplot(exa) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład A (Sploty naturalne, 12 df)") +
+    geom_line(aes(x=x, y=fitted(fit)), col='blue') +
+  geom_line(aes(x=x,y=m), col='red')
+```
+
+## Naturalne sploty w R
+
+```{r exbbspline}
+fit <- lm(y ~ ns(x, df=3), exb)
+ggplot(as.data.frame(exb)) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład B (Naturalne sploty, 3 df)") +
+    geom_line(aes(x=x, y=fitted(fit)), col='blue') +
+  geom_line(aes(x=x,y=m), col='red')
+```
+
+## Naturalne sploty w R
+
+```{r exbb2spline}
+fit <- lm(y ~ ns(x, df=10), exb)
+ggplot(as.data.frame(exb)) +
+    geom_point(aes(x=x,y=y)) +
+    ggtitle("Przykład B (Naturalne sploty, 10 df)") +
+    geom_line(aes(x=x, y=fitted(fit)), col='blue') +
+  geom_line(aes(x=x,y=m), col='red')
+```
+
+## Sploty oraz geom_smooth()
+\fontsize{12}{12}\sf
+
+```{r geomsmooth, echo=TRUE, fig.height=3.4}
+ggplot(exa) +
+    geom_point(aes(x=x,y=y)) +
+    geom_smooth(aes(x=x,y=y), method='gam',
+      formula = y ~ s(x,k=12))
+```
+
+
+
+## Sploty oraz geom_smooth()
+
+* Ponieważ splajny regresyjne używają lokalnych modeli liniowych, możemy łatwo znaleźć błędy standardowe dla dopasowanych wartości.
+
+* Połączone razem, tworzą one punktowy przedział ufności.
+
+* Automatycznie tworzone przy użyciu `geom_smooth`.
+
+
+# Predyktory wieloczynnikowe
+
+## Predyktory wieloczynnikowe
+
+\begin{block}{}
+$$y_i = f(\bm{x}_i) + \varepsilon_i,\qquad \bm{x}\in\mathbb{R}^d$$
+\end{block}
+
+Większość metod w naturalny sposób rozszerza się na więcej wymiarów.
+
+  - Metody jądra wielowymiarowego
+  - Wielowymiarowe lokalne powierzchnie kwadratowe
+  - Cienkie splajny (2-d wersja splajnów wygładzających)
+
+\pause
+
+\begin{alertblock}{Problem}
+Przekleństwo wymiarowości!
+\end{alertblock}
+
+## Przekleństwo wymiarowości
+
+Większość danych leży w pobliżu granicy.
+
+\fontsize{11}{11}\sf
+
+```{r, echo=TRUE, cache=FALSE}
+x <- matrix(runif(1e6,-1,1), ncol=100)
+boundary <- function(z) { any(abs(z) > 0.95) }
+```
+
+\fontsize{11}{0}\sf
+
+```{r, echo=TRUE, cache=FALSE}
+mean(apply(x[,1,drop=FALSE], 1, boundary))
+mean(apply(x[,1:2], 1, boundary))
+mean(apply(x[,1:5], 1, boundary))
+```
+
+\vspace*{10cm}
+
+## Przekleństwo wymiarowości
+
+Większość danych leży w pobliżu granicy.
+
+\fontsize{11}{11}\sf
+
+```{r, echo=TRUE, cache=FALSE}
+x <- matrix(runif(1e6,-1,1), ncol=100)
+boundary <- function(z) { any(abs(z) > 0.95) }
+```
+
+\fontsize{11}{0}\sf
+
+```{r, echo=TRUE, cache=FALSE}
+mean(apply(x[,1:10], 1, boundary))
+mean(apply(x[,1:50], 1, boundary))
+mean(apply(x[,1:100], 1, boundary))
+```
+
+\vspace*{10cm}
+
+## Przekleństwo wymiarowości
+
+Dane są niekompletne!
+
+\fontsize{11}{11}\sf
+
+```{r, echo=TRUE}
+x <- matrix(runif(1e6,-1,1), ncol=100)
+nearby <- function(z) { all(abs(z) < 0.5) }
+mean(apply(x[,1,drop=FALSE], 1, nearby))
+mean(apply(x[,1:2], 1, nearby))
+mean(apply(x[,1:5], 1, nearby))
+```
+
+
+
+## Przekleństwo wymiarowości
+
+Dane są niekompletne!
+
+\fontsize{11}{11}\sf
+
+```{r, echo=TRUE}
+x <- matrix(runif(1e6,-1,1), ncol=100)
+nearby <- function(z) { all(abs(z) < 0.5) }
+mean(apply(x[,1:10], 1, nearby))
+mean(apply(x[,1:50], 1, nearby))
+mean(apply(x[,1:100], 1, nearby))
+```
+
+## Przekleństwo wymiarowości
+
+ * Ilość danych dostępnych w oknie jest proporcjonalna do $n^{-d}$.
+ * Niech $h= 0.5$, i załóżmy, że potrzebujemy 100 obserwacji, aby oszacować nasz model lokalnie.
+
+```{r, fig.height=3.6}
+d <- 1:20
+df <- data.frame(
+  d=d, n=100/(0.5)^d)
+ggplot(df) +
+  geom_point(aes(x=d,y=n)) +
+  scale_y_log10(breaks=10^(0:8))
+```
+
+
+
+## Wygładzanie dwuwymiarowe
+\fontsize{11}{11}\sf
+
+```{r, echo=TRUE}
+lomod <- loess(sr ~ pop15 + ddpi, data=savings)
+```
+
+```{r, fig.height=4.2}
+xg <- seq(21,48,len=20)
+yg <- seq(0,17,len=20)
+zg <- expand.grid(pop15=xg,ddpi=yg)
+par(mar=c(0,0,0,0))
+persp(xg, yg, predict(lomod, zg), theta=-30,
+      ticktype="detailed", col=heat.colors(500),
+      xlab="pop15", ylab="ddpi", zlab="savings rate")
+```
+
+
+
+## Wygładzanie dwuwymiarowe
+\fontsize{11}{11}\sf
+
+```{r, echo=TRUE}
+library(mgcv)
+smod <- gam(sr ~ s(pop15, ddpi), data=savings)
+```
+
+```{r, fig.height=4.2}
+par(mar=c(0,0,0,0))
+mgcv::vis.gam(smod, ticktype="detailed",theta=-30)
+```
+
+# Zadanie 1. 
+
+## Przykład 1: Prestiż względem dochodu.
+
+Zestaw danych "Prestige" (z pakietu "car") zawiera dane nt. prestiżu n=102 Kanadyjskich zawodów z 1971 roku, a także średni dochód w danym zawodzie. Do zbadania zależności między prestiżem a dochodem wykorzystaj metody regresji nieparametrycznej.
+
+```{r}
+library(car)
+data(Prestige)
+head(Prestige)
+```
+
+
+## Przykład 1: Prestiż względem dochodu.
+
+Najpierw załaduj dane i zwizualizuj relację pomiędzy dochodem (X) a prestiżem (Y). 
+
+```{r}
+plot(Prestige$income, Prestige$prestige, 
+     xlab = "Income", ylab = "Prestige")
+```
+
+## Przykład 1: Prestiż względem dochodu.
+
+Uwaga: związek wygląda na nieliniowy. Dla zawodów, które zarabiają mniej niż $10K, istnieje silna (pozytywna) liniowa zależność pomiędzy dochodem a prestiżem. Jednak w przypadku zawodów, które zarabiają od 10 do 25 tysięcy dolarów, związek ten ma znacznie inne (osłabione) nachylenie.
+
+```{r zadanie1}
+
+```
+
+
+# Zadanie 2.
+
+## Przykład 2: Wypadek motocyklowy.
+
+Zbiór danych "mcycle" (z pakietu MASS) zawiera n=133 pary punktów czasowych (w ms) i obserwowanych przyspieszeń głowy (w g), które zostały zarejestrowane w symulowanym wypadku motocyklowym.
+
+Do zbadania zależności między czasem a przyspieszeniem wykorzystaj metody regresji nieparametrycznej.
+
+```{r}
+library(MASS)
+data(mcycle)
+head(mcycle)
+```
+
+## Przykład 2: Wypadek motocyklowy.
+
+Najpierw wczytaj dane i zwizualizuj zależność między czasem (X) a przyspieszeniem (Y).
+
+```{r}
+plot(mcycle$times, mcycle$accel, 
+     xlab = "Czas (ms)", ylab = "Przyspieszenie (g)")
+```
+
+## Przykład 2: Wypadek motocyklowy.
+
+Uwaga: zależność wygląda na nieliniową.
+
+Przyspieszenie jest stabilne od 0-15 ms, spada od ok. 15-20 ms, rośnie od 20-30 ms, spada od 30-40 ms, a następnie zaczyna się stabilizować.
+
+```{r zadanie2}
+
+```
+

@@ -1,0 +1,318 @@
+---
+title: 'Nieklasyczne metody statystyki'
+subtitle: 'Regresja kwantylowa'
+date: "`r Sys.Date()`"
+author: "Twoje imię i nazwisko"
+output:
+  html_document: 
+    theme: cerulean
+    highlight: textmate
+    fontsize: 10pt
+    toc: yes
+    code_download: yes
+    toc_float:
+      collapsed: no
+    df_print: default
+    toc_depth: 5
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r prereqs, message = FALSE, echo = FALSE}
+library(CVXR)
+library(AER)
+library(stargazer)
+library(WRTDStidal)
+library(tidyverse)
+library(kableExtra)
+library(quantreg)
+library(PogromcyDanych)
+```
+
+## Dlaczego kwantylowa?
+
+Dlaczego potrzebujemy regresji kwantylowej (QR)?
+
+W szczególności, QR:
+
+-   jest odporna na punkty odstające i wpływowe
+
+-   nie zakłada stałej wariancji (znanej jako homoskedastyczność) dla
+    zmiennej odpowiedzi lub reszt
+
+-   nie zakłada normalności ale główną zaletą QR w porównaniu z regresją
+    liniową (LR) jest to, że QR bada różne wartości zmiennej odpowiedzi,
+    a nie tylko średnią, i dostarcza w związku z tym pełniejszego obrazu
+    związków między zmiennymi!
+
+## Wprowadzenie
+
+Regresja kwantylowa (ang. quantile regression) została zaproponowana
+przez Koenkera i Bassetta (1978). Szczególny przypadek regresji
+kwantylowej dla kwantyla rzędu 0,5 (czyli mediany) jest równoważny
+estymatorowi LAD (ang. Least Absolute Deviation) -- minimalizuje sumę
+bezwzględnych błędów.\
+Wprowadzenie różnych kwantyli regresji daje pełniejszy opis rozkładów
+warunkowych zwłaszcza w przypadku rozkładów asymetrycznych lub uciętych.
+
+Regresja kwantylowa jest kolejną wariacją na temat najmniejszych
+kwadratów \citep{quantile}. Stratą jest współczynnik $l_1$ funkcji:
+
+$$
+    \phi(u) = \tau\max(u,0) - (1-\tau)\max(-u,0) = \frac{1}{2}|u| + \left(\tau - \frac{1}{2}\right)u,
+$$
+
+gdzie $\tau \in (0,1)$ oznacza konkretny kwantyl. Problemem jak
+poprzednio jest minimalizacja całkowitej straty resztowej. Model ten
+jest powszechnie stosowany w ekologii, ochronie zdrowia i innych
+dziedzinach, gdzie sama średnia nie wystarcza do uchwycenia złożonych
+zależności między zmiennymi.
+
+## Wymagania
+
+Wymagana jest jedna liczbowa zmienna zależna. Zmienna przewidywana musi
+być zmienną ilościową. Predyktory mogą być zmiennymi ilościowymi lub
+sztucznymi zmiennymi w przypadku predyktorów jakościowych. Aby można
+było uruchomić analizę, wymagany jest wyraz wolny lub co najmniej jeden
+predyktor.
+
+Regresja kwantylowa nie czyni założeń dotyczących rozkładu zmiennej
+przewidywanej i jest odporna na wpływ obserwacji odstających.
+
+Analiza kwantylowa jest pokrewna regresji metodą najmniejszych
+kwadratów.
+
+## Przykład 1.
+
+Wykorzystamy przykład z pakietu quantreg.
+
+Jaki jest związek między całkowitym dochodem gospodarstwa domowego a
+odsetkiem dochodów wydatkowanych na żywność? Prawo Engela w ekonomii
+głosi, że w miarę wzrostu dochodów, część dochodów wydatkowanych na
+żywność spada, nawet jeśli wydatki na żywność bezwzględnie rosną.
+Stosując regresję kwantylową do tych danych, można określić, jakie
+wydatki na żywność ponosi 90% rodzin (dla 100 rodzin z danym dochodem),
+gdy nie interesują nas średnie wydatki na żywność.
+
+Dane, które wykorzystamy - to zbiór "engel" - dane dotyczące wydatków na
+żywność. Jest to zbiór danych regresyjnych składający się z 235
+obserwacji dotyczących dochodów i wydatków na żywność dla belgijskich
+gospodarstw domowych klasy robotniczej.
+
+```{r echo=FALSE}
+data(engel) #dane 
+p <- ggplot(data = engel) +
+    geom_point(mapping = aes(x = income, y = foodexp), color = "blue")
+taus <- c(0.1, 0.25, 0.5, 0.75, 0.90, 0.95)
+fits <- data.frame(
+    coef(lm(foodexp ~ income, data = engel)),
+    sapply(taus, function(x) coef(rq(formula = foodexp ~ income, data = engel, tau = x))))
+names(fits) <- c("OLS", sprintf("$\\tau_{%0.2f}$", taus))
+nf <- ncol(fits)
+colors <- colorRampPalette(colors = c("black", "red"))(nf)
+p <- p + geom_abline(intercept = fits[1, 1], slope = fits[2, 1], color = colors[1], linewidth = 1.5)
+for (i in seq_len(nf)[-1]) {
+    p <- p + geom_abline(intercept = fits[1, i], slope = fits[2, i], color = colors[i])
+}
+p
+```
+
+Powyższy wykres przedstawia dopasowanie regresji kwantylowej dla
+$\tau = (0.1, 0.25, 0.5, 0.75, 0.90, 0.95)$. Dopasowanie KMNK to gruba
+czarna linia.
+
+Poniżej znajduje się tabela z oszacowanymi współczynnikami.
+
+```{r}
+knitr::kable(fits, format = "html", caption = "Oszacowania z KMNK oraz `quantreg`") %>%
+    kable_styling("striped") %>%
+    column_spec(1:8, background = "#ececec")
+```
+
+Ok, możemy to zrobić bardziej przejrzyście i sformatować w ładnej tabeli
+wyników:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+q25 <- rq(foodexp ~ income, data = engel, tau = 0.25)
+q50 <- rq(foodexp ~ income, data = engel, tau = 0.50)
+q75 <- rq(foodexp ~ income, data = engel, tau = 0.75)
+
+# Tabela z porównaniem wyników trzech modeli: 
+
+stargazer(q25, q50, q75, title = "Wyniki regresji kwantylowych", type = "text")
+```
+
+Finalnie, zaprezentujmy wyłącznie te 3 modele na wykresie:
+
+```{r echo=FALSE}
+my_qr <- rq(foodexp ~ income, data = engel, tau = seq(0.25, 0.75, 0.25))
+
+intercept_slope <- my_qr %>% 
+  coef() %>% 
+  t() %>% 
+  data.frame() %>% 
+  rename(intercept = X.Intercept., slope = income) %>% 
+  mutate(quantile = row.names(.))
+
+ggplot() + 
+  geom_point(data = engel, aes(income, foodexp), alpha = 0.5) + 
+  geom_abline(data = intercept_slope, aes(intercept = intercept, slope = slope, color = quantile)) + 
+  theme_minimal() + 
+  labs(x = "Dochód", y = "Wydatki na żywność", title = "Regresje kwantylowe z tau = 0.25, 0.50 oraz 0.75", 
+       caption = "Źródło danych: Koenker and Bassett (1982)")
+```
+
+## Przykład 2.
+
+Tutaj przeprowadzimy testy użycia pakietu quantreg, wykorzystując
+wbudowany zbiór danych "**mtcars**". Zmienna "**mpg**" oznacza spalanie
+samochodów (*mile/galon*).
+
+Zamodulejmy zależność regresyjną dla tej zmiennej od kilku predyktorów.
+
+Najpierw oszacujmy regresję KMNK:
+
+```{r}
+kmnk <- lm(mpg ~ disp + hp + factor(am) + factor(vs), data = mtcars)
+summary(kmnk)
+```
+
+Teraz oszacujmy warunkowe regresje kwantylowe na różnych kwantylach,
+błąd standardowy uzyskany przez ***bootstrap***.
+
+Zauważ, że istnieje gradient we współczynnikach kwantylowych **hp**, jak
+również **disp**. Znak **disp** odwraca się, również współczynnik na
+czynniku **am** jest różny w zależności od kwantyli:
+
+```{r}
+kwantyle <- c(0.25, 0.50, 0.75)
+reg_kwantylowa <- rq(mpg ~ disp + hp + factor(am),tau = kwantyle,data = mtcars)
+summary(reg_kwantylowa, se = "boot")
+```
+
+### Testy współczynników
+
+Użyjemy funkcji rq.anova z pakietu regresji kwantylowej, aby
+przeprowadzić test WALDA. Pamiętaj, że test WALDA mówi, że biorąc pod
+uwagę nieograniczone oszacowania modelu, przetestujemy hipotezę zerową
+mówiącą, że współczynniki spełniają pewne liniowe ograniczenia.
+
+Aby ją przetestować, użyjemy obiektu zwróconego z uruchomienia ***rq***
+z różnymi liczbami kwantyli i ustawimy opcję ***joint*** na true lub
+false. Gdy ***joint*** jest true: "równość współczynników kierunkowych
+powinna być wykonana jako wspólne testy na wszystkich parametrach
+nachylenia", gdy ***joint*** jest false: "należy zgłaszać oddzielne
+testy na każdym z parametrów nachylenia".
+
+Zauważ, że testy kwantylowe są testami "linii równoległej". Oznacza to,
+że powinniśmy wyjąć różne x-wyrazy_wolne dla każdego kwantyla, ponieważ
+reprezentują one poziomy rozkładów warunkowych. Jeśli jednak
+współczynniki kwantyli dla współczynnikow są takie same, to nie ma
+efektów specyficznych dla kwantyli, wystarczą efekty średnie.
+
+**Badanie statystycznej różnicy między 25. i 50. kwantylem warunkowym:**
+
+Biorąc pod uwagę powyższe oszacowania kwantyli, różnica między
+kwantylami 0,25 i 0,50 istnieje, ale czy są one wystarczająco duże, aby
+być statystycznie różne? Jaka jest wartość p? Przeglądając poniższe
+wyniki, nie są one statystycznie różne!
+
+Po pierwsze, joint = TRUE. To nie jest testowanie, czy współczynnik na
+disp jest taki sam jak współczynnik na hp. To jest wspólne testowanie,
+czy współczynniki dla różnych kwantyli disp i różnych kwantyli hp są
+takie same dla każdej zmiennej.
+
+```{r}
+kwantyle <- c(0.25, 0.50)
+reg_kwantylowa <- rq(mpg ~ disp + hp + factor(am),tau = kwantyle, data = mtcars)
+anova(reg_kwantylowa, test = "Wald", joint=TRUE)
+```
+
+Po drugie, joint = False:
+
+```{r}
+anova(reg_kwantylowa, test = "Wald", joint=FALSE)
+```
+
+**Badanie statystycznej różnicy między 25, 50 i 75 kwantylem
+warunkowym:**
+
+Pierwszy kwartyl i mediana nie wydają się być statystycznie różne, teraz
+dołączymy trzeci kwartyl. Jak widać wcześniej, kwartyle wspólnie
+wykazują gradient. Teraz możemy zobaczyć, że **disp**, **hp** i **am**
+są oddzielnie statystycznie różne.
+
+Po pierwsze, joint = TRUE:
+
+```{r message=FALSE, warning=FALSE}
+kwantyle <- c(0.25, 0.50, 0.75)
+
+reg_kwantylowa <- rq(mpg ~ disp + hp + factor(am),tau = kwantyle, data = mtcars)
+
+anova(reg_kwantylowa, test = "Wald", joint=TRUE)
+```
+
+Po drugie, joint = False:
+
+```{r message=FALSE, warning=FALSE}
+anova(reg_kwantylowa, test = "Wald", joint=FALSE)
+```
+
+### Dobroć dopasowania
+
+Możemy obliczyć współczynniki dobroci dopasowania regresji kwantylowej z
+wykorzystaniem reszt i reszt bezwarunkowych:
+
+``` r
+goodfit(resid, resid_nl, tau)
+```
+
+Miara dobroci dopasowania dla regresji kwantylowej jest szacowana jako 1
+minus stosunek sumy odchyleń bezwzględnych w modelach w pełni
+sparametryzowanych do sumy odchyleń bezwzględnych w zerowym
+(bezwarunkowym) modelu kwantylowym.
+
+Wartości te są przydatne do porównań między modelami kwantylowymi, ale
+nie są porównywalne ze standardowymi współczynnikami determinacji. Te
+ostatnie oparte są na wariancji odchyleń kwadratowych, natomiast
+wartości dobroci dopasowania dla regresji kwantylowej oparte są na
+odchyleniach bezwzględnych. Wartości dobroci dopasowania zawsze będą
+mniejsze niż wartości R^2^.
+
+```{r message=FALSE, warning=FALSE}
+## model kwantylowy
+model1 <- rq(mpg ~ disp + hp + factor(am),tau = 0.5, data = mtcars)
+reszty1 <- resid(model1)
+
+## bezwarunkowy (pusty) model kwantylowy
+model2 <- rq(mpg ~ 1, tau = 0.5,data=mtcars)
+reszty2 <- resid(model2)
+
+goodfit(reszty1, reszty2, 0.5)
+
+## r2 modelu KMNK dla porównania
+model_lm <- lm(mpg ~ disp + hp + factor(am), data = mtcars)
+
+summary(model_lm)$r.squared
+```
+
+## Zadanie
+
+Teraz Wasza kolej ;-)
+
+Waszym zadaniem dzisiaj jest zamodelowanie - porównanie KMNK oraz
+regresji kwantylowej (różno-poziomowej) dla zmiennej "earnings" -
+wynagrodzenia.
+
+Dobierz i przetestuj predyktory, kwantyle dla modeli. Wykonaj testy
+różnic współczynnikow dla finalnych modeli.
+
+W przypadku problemów - obejrzyj video tutorial (włącz polskie napisy)
+oraz wejdź na jego stronę ze źródłami. Możesz również wykorzystać w/w
+przykłady.
+
+```{r}
+data("CPSSW9298")
+# ?CPSSW9298 
+```
